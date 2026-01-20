@@ -52,57 +52,21 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        // Custom esports theme colors
-        "neon-blue": {
-          DEFAULT: "hsl(217 91.2% 59.8%)", // Original sidebar-ring, now primary neon blue
-          50: "hsl(217 91.2% 85%)",
-          100: "hsl(217 91.2% 80%)",
-          200: "hsl(217 91.2% 70%)",
-          300: "hsl(217 91.2% 60%)",
-          400: "hsl(217 91.2% 50%)",
-          500: "hsl(217 91.2% 40%)",
-          600: "hsl(217 91.2% 30%)",
-          700: "hsl(217 91.2% 20%)",
-          800: "hsl(217 91.2% 15%)",
-          900: "hsl(217 91.2% 10%)",
-        },
-        "neon-purple": {
-          DEFAULT: "hsl(270 80% 60%)",
-          50: "hsl(270 80% 90%)",
-          100: "hsl(270 80% 80%)",
-          200: "hsl(270 80% 70%)",
-          300: "hsl(270 80% 60%)",
-          400: "hsl(270 80% 50%)",
-          500: "hsl(270 80% 40%)",
-          600: "hsl(270 80% 30%)",
-          700: "hsl(270 80% 20%)",
-          800: "hsl(270 80% 15%)",
-          900: "hsl(270 80% 10%)",
-        },
-        "neon-red": {
-          DEFAULT: "hsl(350 80% 60%)",
-          50: "hsl(350 80% 90%)",
-          100: "hsl(350 80% 80%)",
-          200: "hsl(350 80% 70%)",
-          300: "hsl(350 80% 60%)",
-          400: "hsl(350 80% 50%)",
-          500: "hsl(350 80% 40%)",
-          600: "hsl(350 80% 30%)",
-          700: "hsl(350 80% 20%)",
-          800: "hsl(350 80% 15%)",
-          900: "hsl(350 80% 10%)",
-        },
-        dark: {
-          DEFAULT: "hsl(220 15% 10%)", // Dark background
-          foreground: "hsl(210 20% 98%)", // Light text on dark background
-          card: "hsl(220 15% 15%)", // Slightly lighter dark for cards
-          border: "hsl(220 15% 25%)", // Border color
+        sidebar: {
+          DEFAULT: "hsl(var(--sidebar-background))",
+          foreground: "hsl(var(--sidebar-foreground))",
+          primary: "hsl(var(--sidebar-primary))",
+          "primary-foreground": "hsl(var(--sidebar-primary-foreground))",
+          accent: "hsl(var(--sidebar-accent))",
+          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
+          border: "hsl(var(--sidebar-border))",
+          ring: "hsl(var(--sidebar-ring))",
         },
       },
       borderRadius: {
-        lg: "1rem", // More rounded
-        md: "0.75rem",
-        sm: "0.5rem",
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
       },
       keyframes: {
         "accordion-down": {
@@ -121,22 +85,10 @@ export default {
             height: "0",
           },
         },
-        "neon-glow": {
-          "0%, 100%": { textShadow: "0 0 5px hsl(var(--neon-blue)), 0 0 10px hsl(var(--neon-blue))" },
-          "50%": { textShadow: "0 0 10px hsl(var(--neon-blue)), 0 0 20px hsl(var(--neon-blue))" },
-        },
-        "pulse-glow": {
-          "0%, 100%": { boxShadow: "0 0 5px var(--tw-shadow-color)" },
-          "50%": { boxShadow: "0 0 15px var(--tw-shadow-color)" },
-        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        "neon-glow": "neon-glow 1.5s ease-in-out infinite alternate",
-        "pulse-glow-blue": "pulse-glow 2s ease-in-out infinite alternate var(--neon-blue)",
-        "pulse-glow-purple": "pulse-glow 2s ease-in-out infinite alternate var(--neon-purple)",
-        "pulse-glow-red": "pulse-glow 2s ease-in-out infinite alternate var(--neon-red)",
       },
     },
   },
