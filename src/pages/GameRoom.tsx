@@ -6,13 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MadeWithDyad } from "@/components/made-with-dyad";
 import { showSuccess, showError } from "@/utils/toast";
-import { GameLobby } from "@/components/GameLobby"; // Import GameLobby
+import { GameLobby } from "@/components/GameLobby";
+import { GameArea } from "@/components/GameArea"; // Import GameArea
+import { supabase } from "@/lib/supabaseClient";
+import { GameState, Player, Card as CardType } from "@/types/game"; // Renamed Card to CardType to avoid conflict
 
 const GameRoom = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
-  const [players, setPlayers] = useState<string[]>([]); // Placeholder for players
-  const [gameStarted, setGameStarted] = useState(false); // Placeholder for game state
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [localPlayerId, setLocalPlayerId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!roomId) {
@@ -20,28 +23,126 @@ const GameRoom = () => {
       navigate("/home");
       return;
     }
-    showSuccess(`Joined room: ${roomId}`);
-    // In a real app, you'd connect to a backend here to join the room
-    // and fetch initial game state/players.
-    // For now, let's simulate adding a player.
-    setPlayers(["Player 1"]); // Simulate one player joining
-  }, [roomId, navigate]);
 
-  // Simulate game start when 4 players join
-  useEffect(() => {
-    if (players.length === 4 && !gameStarted) {
-      setGameStarted(true);
-      showSuccess("Game starting!");
+    // Generate a unique ID for the local player if not already set
+    if (!localPlayerId) {
+      const newPlayerId = `player_${Math.random().toString(36).substring(2, 9)}`;
+      setLocalPlayerId(newPlayerId);
     }
-  }, [players, gameStarted]);
 
-  const handleLeaveRoom = () => {
+    const fetchGameState = async () => {
+      const { data, error } = await supabase
+        .from('games')
+        .select('*')
+        .eq('roomId', roomId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 means "no rows found"
+        showError(`Failed to load game state: ${error.message}`);
+        navigate("/home");
+        return;
+      }
+
+      if (data) {
+        setGameState(data as GameState);
+        showSuccess(`Joined room: ${roomId}`);
+      } else {
+        // If no game exists, GameLobby will create it
+        showSuccess(`Creating new room: ${roomId}`);
+      }
+    };
+
+    fetchGameState();
+
+    // Set up real-time listener for game state changes
+    const channel = supabase
+      .channel(`game_room_${roomId}_full_state`)
+      .on<GameState>(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'games', filter: `roomId=eq.${roomId}` },
+        (payload) => {
+          setGameState(payload.new as GameState);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomId, navigate, localPlayerId]);
+
+  const handleGameStart = async () => {
+    if (!gameState || gameState.players.length !== 4) return;
+
+    // Simulate initial game setup: deal cards, set dealer, first turn
+    const initialDeck: CardType[] = []; // Placeholder for a full deck
+    // Populate initialDeck with 32 Belote cards (7, 8, 9, 10, J, Q, K, A of each suit)
+    const suits: CardType['suit'][] = ['clubs', 'diamonds', 'hearts', 'spades'];
+    const ranks: CardType['rank'][] = ['7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+    for (const suit of suits) {
+      for (const rank of ranks) {
+        initialDeck.push({ suit, rank });
+      }
+    }
+
+    // Shuffle deck (simple shuffle for now)
+    for (let i = initialDeck.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [initialDeck[i], initialDeck[j]] = [initialDeck[j], initialDeck[i]];
+    }
+
+    const updatedPlayers = gameState.players.map(player => ({ ...player, hand: [] }));
+    let currentDeck = [...initialDeck];
+
+    // Deal 5 cards to each player
+    for (let i = 0; i < 5; i++) {
+      for (let j = 0; j < updatedPlayers.length; j++) {
+        if (currentDeck.length > 0) {
+          updatedPlayers[j].hand.push(currentDeck.pop()!);
+        }
+      }
+    }
+
+    const dealerPlayerId = updatedPlayers[0].id; // First player is dealer for simplicity
+    const firstTurnPlayerId = updatedPlayers[1].id; // Player after dealer starts
+
+    const { error } = await supabase
+      .from('games')
+      .update({
+        status: 'bidding', // Or 'playing' if skipping bidding for now
+        players: updatedPlayers,
+        deck: currentDeck,
+        dealerPlayerId: dealerPlayerId,
+        currentTurnPlayerId: firstTurnPlayerId,
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', roomId);
+
+    if (error) {
+      showError(`Failed to start game: ${error.message}`);
+    } else {
+      showSuccess("Game started!");
+    }
+  };
+
+  const handleLeaveRoom = async () => {
+    if (gameState && localPlayerId) {
+      const updatedPlayers = gameState.players.filter(p => p.id !== localPlayerId);
+      const { error } = await supabase
+        .from('games')
+        .update({ players: updatedPlayers, updatedAt: new Date().toISOString() })
+        .eq('id', roomId);
+
+      if (error) {
+        showError(`Failed to leave room: ${error.message}`);
+      }
+    }
     showSuccess("Left the room.");
     navigate("/home");
   };
 
-  if (!roomId) {
-    return null; // Should be redirected by useEffect
+  if (!roomId || !localPlayerId) {
+    return null; // Should be redirected or waiting for localPlayerId
   }
 
   return (
@@ -51,18 +152,17 @@ const GameRoom = () => {
           <CardTitle className="text-3xl font-extrabold text-blue-800 mb-2">Room: {roomId}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          {!gameStarted ? (
-            <GameLobby roomId={roomId} players={players} setPlayers={setPlayers} />
+          {gameState && gameState.status === 'lobby' ? (
+            <GameLobby
+              roomId={roomId}
+              players={gameState.players}
+              setPlayers={(newPlayers) => setGameState(prev => prev ? { ...prev, players: newPlayers } : null)}
+              onGameStart={handleGameStart}
+            />
+          ) : gameState && (gameState.status === 'bidding' || gameState.status === 'playing' || gameState.status === 'ended') ? (
+            <GameArea gameState={gameState} localPlayerId={localPlayerId} />
           ) : (
-            <div className="text-center">
-              <h2 className="text-2xl font-bold text-gray-800 mb-4">Game in Progress!</h2>
-              <p className="text-lg text-gray-700">This is where the Belote game will be played.</p>
-              {/* Placeholder for game UI */}
-              <div className="mt-6 p-4 bg-gray-100 rounded-lg border border-gray-200">
-                <p className="text-gray-600">Game state will be synchronized here.</p>
-                <p className="text-gray-600">Players: {players.join(", ")}</p>
-              </div>
-            </div>
+            <div className="text-center text-lg text-gray-700">Loading game state...</div>
           )}
           <Button
             onClick={handleLeaveRoom}
