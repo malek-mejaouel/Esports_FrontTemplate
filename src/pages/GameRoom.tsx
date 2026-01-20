@@ -7,9 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MadeWithDyad } from "@/components/made-with-dyad";
 import { showSuccess, showError } from "@/utils/toast";
 import { GameLobby } from "@/components/GameLobby";
-import { GameArea } from "@/components/GameArea"; // Import GameArea
+import { GameArea } from "@/components/GameArea";
+import { BiddingPhase } from "@/components/BiddingPhase"; // Import BiddingPhase
 import { supabase } from "@/lib/supabaseClient";
-import { GameState, Player, Card as CardType } from "@/types/game"; // Renamed Card to CardType to avoid conflict
+import { GameState, Player, Card as CardType } from "@/types/game";
+import { createDeck, shuffleDeck, dealCards, getNextPlayerId } from "@/utils/gameLogic"; // Import game logic utilities
 
 const GameRoom = () => {
   const { roomId } = useParams<{ roomId: string }>();
@@ -26,8 +28,14 @@ const GameRoom = () => {
 
     // Generate a unique ID for the local player if not already set
     if (!localPlayerId) {
-      const newPlayerId = `player_${Math.random().toString(36).substring(2, 9)}`;
-      setLocalPlayerId(newPlayerId);
+      const storedPlayerId = localStorage.getItem('belote_local_player_id');
+      if (storedPlayerId) {
+        setLocalPlayerId(storedPlayerId);
+      } else {
+        const newPlayerId = `player_${Math.random().toString(36).substring(2, 9)}`;
+        localStorage.setItem('belote_local_player_id', newPlayerId);
+        setLocalPlayerId(newPlayerId);
+      }
     }
 
     const fetchGameState = async () => {
@@ -72,48 +80,40 @@ const GameRoom = () => {
   }, [roomId, navigate, localPlayerId]);
 
   const handleGameStart = async () => {
-    if (!gameState || gameState.players.length !== 4) return;
-
-    // Simulate initial game setup: deal cards, set dealer, first turn
-    const initialDeck: CardType[] = []; // Placeholder for a full deck
-    // Populate initialDeck with 32 Belote cards (7, 8, 9, 10, J, Q, K, A of each suit)
-    const suits: CardType['suit'][] = ['clubs', 'diamonds', 'hearts', 'spades'];
-    const ranks: CardType['rank'][] = ['7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-    for (const suit of suits) {
-      for (const rank of ranks) {
-        initialDeck.push({ suit, rank });
-      }
+    if (!gameState || gameState.players.length !== 4) {
+      showError("Need exactly 4 players to start the game.");
+      return;
     }
 
-    // Shuffle deck (simple shuffle for now)
-    for (let i = initialDeck.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [initialDeck[i], initialDeck[j]] = [initialDeck[j], initialDeck[i]];
-    }
+    // Assign teams (Player 1 & 3 are Team 1, Player 2 & 4 are Team 2)
+    const team1Players = [gameState.players[0].id, gameState.players[2].id];
+    const team2Players = [gameState.players[1].id, gameState.players[3].id];
 
-    const updatedPlayers = gameState.players.map(player => ({ ...player, hand: [] }));
-    let currentDeck = [...initialDeck];
+    const initialDeck = shuffleDeck(createDeck());
+    const { updatedPlayers, remainingDeck } = dealCards(initialDeck, gameState.players);
 
-    // Deal 5 cards to each player
-    for (let i = 0; i < 5; i++) {
-      for (let j = 0; j < updatedPlayers.length; j++) {
-        if (currentDeck.length > 0) {
-          updatedPlayers[j].hand.push(currentDeck.pop()!);
-        }
-      }
-    }
-
-    const dealerPlayerId = updatedPlayers[0].id; // First player is dealer for simplicity
-    const firstTurnPlayerId = updatedPlayers[1].id; // Player after dealer starts
+    const dealerPlayerId = gameState.players[0].id; // First player is dealer for simplicity
+    const firstTurnPlayerId = getNextPlayerId(dealerPlayerId, gameState.players); // Player after dealer starts bidding
 
     const { error } = await supabase
       .from('games')
       .update({
-        status: 'bidding', // Or 'playing' if skipping bidding for now
+        status: 'bidding',
         players: updatedPlayers,
-        deck: currentDeck,
+        deck: remainingDeck,
         dealerPlayerId: dealerPlayerId,
         currentTurnPlayerId: firstTurnPlayerId,
+        team1Players: team1Players,
+        team2Players: team2Players,
+        team1Score: 0,
+        team2Score: 0,
+        roundNumber: 1,
+        bids: [],
+        currentContract: null,
+        trumpSuit: null,
+        currentTrick: [],
+        leadSuit: null,
+        winnerPlayerId: null,
         updatedAt: new Date().toISOString(),
       })
       .eq('id', roomId);
@@ -121,7 +121,7 @@ const GameRoom = () => {
     if (error) {
       showError(`Failed to start game: ${error.message}`);
     } else {
-      showSuccess("Game started!");
+      showSuccess("Game started! Bidding phase begins.");
     }
   };
 
@@ -137,12 +137,24 @@ const GameRoom = () => {
         showError(`Failed to leave room: ${error.message}`);
       }
     }
+    localStorage.removeItem('belote_local_player_id'); // Clear local player ID
     showSuccess("Left the room.");
     navigate("/home");
   };
 
-  if (!roomId || !localPlayerId) {
-    return null; // Should be redirected or waiting for localPlayerId
+  if (!roomId || !localPlayerId || !gameState) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-400 to-blue-500 p-4">
+        <Card className="w-full max-w-md rounded-xl shadow-2xl border-none bg-white/90 backdrop-blur-sm">
+          <CardHeader className="text-center">
+            <CardTitle className="text-3xl font-extrabold text-blue-800 mb-2">Loading Room...</CardTitle>
+          </CardHeader>
+          <CardContent className="text-center text-lg text-gray-700">
+            Please wait while we set up your game.
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -152,17 +164,23 @@ const GameRoom = () => {
           <CardTitle className="text-3xl font-extrabold text-blue-800 mb-2">Room: {roomId}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          {gameState && gameState.status === 'lobby' ? (
+          {gameState.status === 'lobby' && (
             <GameLobby
               roomId={roomId}
               players={gameState.players}
               setPlayers={(newPlayers) => setGameState(prev => prev ? { ...prev, players: newPlayers } : null)}
               onGameStart={handleGameStart}
             />
-          ) : gameState && (gameState.status === 'bidding' || gameState.status === 'playing' || gameState.status === 'ended') ? (
+          )}
+          {gameState.status === 'bidding' && (
+            <BiddingPhase
+              gameState={gameState}
+              localPlayerId={localPlayerId}
+              onBidMade={(updatedGameState) => setGameState(updatedGameState)}
+            />
+          )}
+          {(gameState.status === 'playing' || gameState.status === 'ended') && (
             <GameArea gameState={gameState} localPlayerId={localPlayerId} />
-          ) : (
-            <div className="text-center text-lg text-gray-700">Loading game state...</div>
           )}
           <Button
             onClick={handleLeaveRoom}
