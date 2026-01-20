@@ -31,8 +31,7 @@ const PlayerDetails = () => {
     <div className="container mx-auto py-8 space-y-10">
       <Link to="/players" className="flex items-center gap-2 text-neon-blue hover:text-neon-purple transition-colors duration-200 mb-6">
         <ArrowLeft size={20} /> Back to Players
-      </Button>
-        </Link>
+      </Link>
 
       <Card className="glassmorphism rounded-xl border border-border shadow-lg p-6">
         <CardHeader className="text-center mb-6">
