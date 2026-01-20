@@ -62,6 +62,10 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        // Custom neon colors
+        'neon-blue': 'hsl(var(--neon-blue))',
+        'neon-purple': 'hsl(var(--neon-purple))',
+        'neon-red': 'hsl(var(--neon-red))',
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -92,5 +96,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 } satisfies Config;

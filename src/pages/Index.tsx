@@ -11,9 +11,9 @@ const Index = () => {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
       <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Loading...</h1>
+        <h1 className="text-4xl font-bold neon-text-purple mb-4">Loading Esports Hub...</h1>
       </div>
     </div>
   );
