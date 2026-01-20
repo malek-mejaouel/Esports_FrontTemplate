@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,32 +21,77 @@ export const BiddingPhase: React.FC<BiddingPhaseProps> = ({ gameState, localPlay
   const [selectedBidSuit, setSelectedBidSuit] = useState<CardType['suit'] | 'no-trump' | 'all-trump' | null>(null);
 
   const isMyTurn = currentTurnPlayerId === localPlayerId;
+  const isBotTurn = currentTurnPlayerId?.startsWith('bot_');
   const localPlayer = players.find(p => p.id === localPlayerId);
   const highestBid = bids.filter(b => !b.isPass).reduce((max, bid) => Math.max(max, bid.value), 0);
   const highestBidder = bids.find(b => b.value === highestBid && !b.isPass);
 
-  const handleMakeBid = async (isPass: boolean) => {
-    if (!isMyTurn) {
-      showError("It's not your turn to bid!");
-      return;
-    }
+  // Bot bidding logic
+  useEffect(() => {
+    if (isBotTurn && currentTurnPlayerId) {
+      const botPlayer = players.find(p => p.id === currentTurnPlayerId);
+      if (!botPlayer) return;
 
-    if (!isPass && (selectedBidValue === null || selectedBidSuit === null)) {
+      const botMakeBid = async () => {
+        const minBidValue = getMinimumBid(bids);
+        const bidOptions = getBidOptions(bids);
+        const availableSuits = getAvailableBidSuits(bids);
+
+        // Simple bot strategy:
+        // 1. If no bids yet, make a minimum bid (e.g., 80 or 90)
+        // 2. If there's a bid, try to overbid by 10-20 points with a random suit, or pass.
+        // 3. Sometimes pass to make it more realistic.
+
+        const shouldPass = Math.random() < 0.3; // 30% chance to pass
+        let bidValueToMake: number | null = null;
+        let bidSuitToMake: CardType['suit'] | 'no-trump' | 'all-trump' | null = null;
+
+        if (shouldPass || minBidValue > 160) { // If min bid is too high, bot passes
+          // Pass
+        } else {
+          // Try to bid
+          const possibleBids = bidOptions.filter(opt => opt.value >= minBidValue && opt.value <= 160);
+          if (possibleBids.length > 0) {
+            bidValueToMake = possibleBids[Math.floor(Math.random() * possibleBids.length)].value;
+            bidSuitToMake = availableSuits[Math.floor(Math.random() * availableSuits.length)];
+          } else {
+            // If no standard bids possible, try Capot or pass
+            if (Math.random() < 0.5) { // 50% chance to bid Capot if nothing else
+              bidValueToMake = 250;
+              bidSuitToMake = availableSuits[Math.floor(Math.random() * availableSuits.length)];
+            } else {
+              // Pass
+            }
+          }
+        }
+
+        await handleMakeBid(bidValueToMake === null, bidValueToMake, bidSuitToMake);
+      };
+
+      const timer = setTimeout(botMakeBid, 1500); // Bot takes 1.5 seconds to make a decision
+      return () => clearTimeout(timer);
+    }
+  }, [isBotTurn, currentTurnPlayerId, bids, players]); // Depend on bids to re-evaluate bot turn
+
+  const handleMakeBid = async (isPass: boolean, value: number | null = selectedBidValue, suit: CardType['suit'] | 'no-trump' | 'all-trump' | null = selectedBidSuit) => {
+    if (!currentTurnPlayerId) return; // Should not happen if it's a turn
+
+    if (!isPass && (value === null || suit === null)) {
       showError("Please select a bid value and suit/type.");
       return;
     }
 
     const minBidValue = getMinimumBid(bids);
-    if (!isPass && selectedBidValue! < minBidValue) {
+    if (!isPass && value! < minBidValue) {
       showError(`Your bid must be at least ${minBidValue}.`);
       return;
     }
 
     const newBid: Bid = {
-      playerId: localPlayerId,
-      value: isPass ? 0 : selectedBidValue!,
-      suit: isPass || selectedBidSuit === 'no-trump' || selectedBidSuit === 'all-trump' ? null : (selectedBidSuit as CardType['suit']),
-      type: isPass ? 'suit' : (selectedBidSuit === 'no-trump' ? 'no-trump' : (selectedBidSuit === 'all-trump' ? 'all-trump' : 'suit')),
+      playerId: currentTurnPlayerId, // Use currentTurnPlayerId for the bid
+      value: isPass ? 0 : value!,
+      suit: isPass || suit === 'no-trump' || suit === 'all-trump' ? null : (suit as CardType['suit']),
+      type: isPass ? 'suit' : (suit === 'no-trump' ? 'no-trump' : (suit === 'all-trump' ? 'all-trump' : 'suit')),
       isPass: isPass,
     };
 
@@ -64,8 +109,6 @@ export const BiddingPhase: React.FC<BiddingPhaseProps> = ({ gameState, localPlay
 
     if (allPassed) {
       showError("All players passed. The round is cancelled or re-dealt in a real game. For now, returning to lobby.");
-      // In a real game, this would trigger a re-deal or specific rules.
-      // For simplicity, let's reset to lobby or end the game.
       const { error: updateError } = await supabase
         .from('games')
         .update({ status: 'lobby', bids: [], currentContract: null, trumpSuit: null, updatedAt: new Date().toISOString() })
@@ -75,22 +118,20 @@ export const BiddingPhase: React.FC<BiddingPhaseProps> = ({ gameState, localPlay
     }
 
     if (activeBids.length > 0 && lastThreeBids.length === 3 && lastThreeBids.every(b => b.isPass)) {
-      // Bidding ends, contract is set
       const finalHighestBid = activeBids.reduce((max, bid) => (bid.value > max.value ? bid : max), activeBids[0]);
       newContract = {
         playerId: finalHighestBid.playerId,
         value: finalHighestBid.value,
         suit: finalHighestBid.suit,
         type: finalHighestBid.type,
-        isBelote: false, // Belote/Rebelote declared during play
+        isBelote: false,
       };
       newTrumpSuit = finalHighestBid.suit;
-      if (finalHighestBid.type === 'all-trump') newTrumpSuit = 'clubs'; // Placeholder, actual all-trump logic is more complex
+      if (finalHighestBid.type === 'all-trump') newTrumpSuit = 'clubs';
       if (finalHighestBid.type === 'no-trump') newTrumpSuit = null;
 
-      updatedStatus = 'playing'; // Transition to playing phase
+      updatedStatus = 'playing';
 
-      // Deal remaining cards (3 cards to each player)
       const { updatedPlayers: playersAfterDeal, remainingDeck } = await dealRemainingCards(gameState.deck, players);
 
       const { error } = await supabase
@@ -100,7 +141,7 @@ export const BiddingPhase: React.FC<BiddingPhaseProps> = ({ gameState, localPlay
           currentContract: newContract,
           trumpSuit: newTrumpSuit,
           status: updatedStatus,
-          currentTurnPlayerId: getNextPlayerId(dealerPlayerId!, players), // Player after dealer starts playing
+          currentTurnPlayerId: getNextPlayerId(dealerPlayerId!, players),
           players: playersAfterDeal,
           deck: remainingDeck,
           updatedAt: new Date().toISOString(),
@@ -116,7 +157,6 @@ export const BiddingPhase: React.FC<BiddingPhaseProps> = ({ gameState, localPlay
       return;
     }
 
-    // Continue bidding
     const { error } = await supabase
       .from('games')
       .update({
@@ -129,7 +169,7 @@ export const BiddingPhase: React.FC<BiddingPhaseProps> = ({ gameState, localPlay
     if (error) {
       showError(`Failed to make bid: ${error.message}`);
     } else {
-      showSuccess(isPass ? "You passed." : `You bid ${selectedBidValue} ${selectedBidSuit}.`);
+      showSuccess(isPass ? `${players.find(p => p.id === currentTurnPlayerId)?.name} passed.` : `${players.find(p => p.id === currentTurnPlayerId)?.name} bid ${value} ${suit}.`);
       onBidMade({ ...gameState, bids: updatedBids, currentTurnPlayerId: nextTurnPlayerId });
     }
   };

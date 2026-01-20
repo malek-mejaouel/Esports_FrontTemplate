@@ -32,6 +32,7 @@ export const GameArea: React.FC<GameAreaProps> = ({ gameState, localPlayerId }) 
 
   const localPlayer = players.find(p => p.id === localPlayerId);
   const isMyTurn = currentTurnPlayerId === localPlayerId;
+  const isBotTurn = currentTurnPlayerId?.startsWith('bot_');
   const [trickPoints, setTrickPoints] = useState(0);
 
   useEffect(() => {
@@ -41,6 +42,32 @@ export const GameArea: React.FC<GameAreaProps> = ({ gameState, localPlayerId }) 
       setTrickPoints(0);
     }
   }, [currentTrick, trumpSuit, currentContract]);
+
+  // Bot card playing logic
+  useEffect(() => {
+    if (isBotTurn && currentTurnPlayerId && currentContract) {
+      const botPlayer = players.find(p => p.id === currentTurnPlayerId);
+      if (!botPlayer || botPlayer.hand.length === 0) return;
+
+      const botPlayCard = async () => {
+        // Simple bot strategy: play the first valid card in hand
+        for (const card of botPlayer.hand) {
+          if (canPlayCard(botPlayer.hand, card, currentTrick, trumpSuit, currentContract.type)) {
+            await handlePlayCard(card, currentTurnPlayerId); // Pass bot's ID
+            return;
+          }
+        }
+        // Fallback: if no valid card found (shouldn't happen with correct canPlayCard)
+        if (botPlayer.hand.length > 0) {
+          await handlePlayCard(botPlayer.hand[0], currentTurnPlayerId);
+        }
+      };
+
+      const timer = setTimeout(botPlayCard, 1500); // Bot takes 1.5 seconds to play
+      return () => clearTimeout(timer);
+    }
+  }, [isBotTurn, currentTurnPlayerId, currentContract, currentTrick, players, trumpSuit]);
+
 
   // Effect to handle trick completion
   useEffect(() => {
@@ -134,8 +161,8 @@ export const GameArea: React.FC<GameAreaProps> = ({ gameState, localPlayerId }) 
   }, [players, currentContract, status, gameId, roundNumber, team1Players, team2Players, team1Score, team2Score, trumpSuit, gameState.dealerPlayerId]);
 
 
-  const handlePlayCard = async (card: Card) => {
-    if (!isMyTurn) {
+  const handlePlayCard = async (card: Card, playerId: string = localPlayerId!) => {
+    if (!currentTurnPlayerId || currentTurnPlayerId !== playerId) {
       showError("It's not your turn!");
       return;
     }
@@ -144,14 +171,19 @@ export const GameArea: React.FC<GameAreaProps> = ({ gameState, localPlayerId }) 
       return;
     }
 
+    const playerToUpdate = players.find(p => p.id === playerId);
+    if (!playerToUpdate) return;
+
     // Validate card play
-    if (!canPlayCard(localPlayer!.hand, card, currentTrick, trumpSuit, currentContract.type)) {
-      showError("You cannot play that card according to Belote rules!");
+    if (!canPlayCard(playerToUpdate.hand, card, currentTrick, trumpSuit, currentContract.type)) {
+      if (playerId === localPlayerId) { // Only show error to human player
+        showError("You cannot play that card according to Belote rules!");
+      }
       return;
     }
 
-    const updatedTrick = [...currentTrick, { playerId: localPlayerId, card }];
-    const updatedPlayerHand = localPlayer?.hand.filter(c => c.rank !== card.rank || c.suit !== card.suit) || [];
+    const updatedTrick = [...currentTrick, { playerId: playerId, card }];
+    const updatedPlayerHand = playerToUpdate.hand.filter(c => c.rank !== card.rank || c.suit !== card.suit) || [];
 
     const nextTurnPlayerId = getNextPlayerId(currentTurnPlayerId!, players);
     const newLeadSuit = currentTrick.length === 0 ? card.suit : leadSuit;
@@ -161,7 +193,7 @@ export const GameArea: React.FC<GameAreaProps> = ({ gameState, localPlayerId }) 
       .from('games')
       .update({
         currentTrick: updatedTrick,
-        players: players.map(p => p.id === localPlayerId ? { ...p, hand: updatedPlayerHand } : p),
+        players: players.map(p => p.id === playerId ? { ...p, hand: updatedPlayerHand } : p),
         currentTurnPlayerId: nextTurnPlayerId,
         leadSuit: newLeadSuit,
         updatedAt: new Date().toISOString(),
@@ -171,20 +203,24 @@ export const GameArea: React.FC<GameAreaProps> = ({ gameState, localPlayerId }) 
     if (error) {
       showError(`Failed to play card: ${error.message}`);
     } else {
-      showSuccess(`You played ${card.rank} of ${card.suit}`);
+      if (playerId === localPlayerId) {
+        showSuccess(`You played ${card.rank} of ${card.suit}`);
+      } else {
+        showSuccess(`${playerToUpdate.name} played ${card.rank} of ${card.suit}`);
+      }
     }
   };
 
   const renderPlayerHand = (player: Player) => (
     <div key={player.id} className="p-3 bg-gray-100 rounded-lg shadow-sm border border-gray-200">
-      <h4 className="font-semibold text-gray-800">{player.name} {player.id === localPlayerId && "(You)"}</h4>
+      <h4 className="font-semibold text-gray-800">{player.name} {player.id === localPlayerId && "(You)"} {player.id.startsWith('bot_') && "(Bot)"}</h4>
       <p className="text-sm text-gray-600">Tricks Won: {player.tricksWon}</p>
       <p className="text-sm text-gray-600">Round Score: {player.score}</p>
       <div className="flex flex-wrap gap-2 mt-2">
         {player.hand.map((card, index) => (
           <Button
             key={`${card.rank}-${card.suit}-${index}`}
-            onClick={() => handlePlayCard(card)}
+            onClick={() => handlePlayCard(card, player.id)}
             disabled={!isMyTurn || player.id !== localPlayerId || !currentContract}
             className="px-3 py-1 text-sm rounded-md bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >

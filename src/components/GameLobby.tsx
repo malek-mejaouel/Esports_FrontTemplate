@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { showSuccess, showError } from "@/utils/toast";
 import { supabase } from "@/lib/supabaseClient";
 import { GameState, Player } from "@/types/game";
+import { Button } from "@/components/ui/button"; // Import Button component
 
 interface GameLobbyProps {
   roomId: string;
@@ -22,8 +23,14 @@ export const GameLobby: React.FC<GameLobbyProps> = ({ roomId, players, setPlayer
   useEffect(() => {
     // Generate a unique ID for the local player if not already set
     if (!localPlayerId) {
-      const newPlayerId = `player_${Math.random().toString(36).substring(2, 9)}`;
-      setLocalPlayerId(newPlayerId);
+      const storedPlayerId = localStorage.getItem('belote_local_player_id');
+      if (storedPlayerId) {
+        setLocalPlayerId(storedPlayerId);
+      } else {
+        const newPlayerId = `player_${Math.random().toString(36).substring(2, 9)}`;
+        localStorage.setItem('belote_local_player_id', newPlayerId);
+        setLocalPlayerId(newPlayerId);
+      }
     }
   }, [localPlayerId]);
 
@@ -52,7 +59,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({ roomId, players, setPlayer
       if (!currentPlayers.some(p => p.id === localPlayerId)) {
         const newPlayer: Player = {
           id: localPlayerId,
-          name: `Player ${currentPlayers.length + 1}`, // Simple naming for now
+          name: `Player ${currentPlayers.filter(p => !p.id.startsWith('bot_')).length + 1}`, // Simple naming for now
           hand: [],
           score: 0,
           tricksWon: 0,
@@ -81,9 +88,15 @@ export const GameLobby: React.FC<GameLobbyProps> = ({ roomId, players, setPlayer
           dealerPlayerId: null,
           trumpSuit: null,
           currentTrick: [],
+          leadSuit: null,
           deck: [],
-          roundScores: {},
-          totalScores: {},
+          bids: [],
+          currentContract: null,
+          roundNumber: 0, // Will be 1 when game starts
+          team1Players: [],
+          team2Players: [],
+          team1Score: 0,
+          team2Score: 0,
           winnerPlayerId: null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -122,6 +135,35 @@ export const GameLobby: React.FC<GameLobbyProps> = ({ roomId, players, setPlayer
     };
   }, [roomId, localPlayerId, setPlayers, onGameStart]);
 
+  const handleAddBot = async () => {
+    if (players.length >= maxPlayers) {
+      showError("Room is already full!");
+      return;
+    }
+
+    const botId = `bot_${Math.random().toString(36).substring(2, 9)}`;
+    const newBot: Player = {
+      id: botId,
+      name: `Bot ${players.filter(p => p.id.startsWith('bot_')).length + 1}`,
+      hand: [],
+      score: 0,
+      tricksWon: 0,
+    };
+
+    const updatedPlayers = [...players, newBot];
+
+    const { error } = await supabase
+      .from('games')
+      .update({ players: updatedPlayers, updatedAt: new Date().toISOString() })
+      .eq('roomId', roomId);
+
+    if (error) {
+      showError(`Failed to add bot: ${error.message}`);
+    } else {
+      showSuccess(`Bot ${newBot.name} joined the room.`);
+    }
+  };
+
   return (
     <div className="text-center space-y-4">
       <CardDescription className="text-xl text-gray-700 font-medium">
@@ -136,10 +178,20 @@ export const GameLobby: React.FC<GameLobbyProps> = ({ roomId, players, setPlayer
         <h3 className="text-lg font-semibold text-gray-800 mb-2">Players in Lobby:</h3>
         <ul className="list-disc list-inside text-gray-700">
           {players.map((player, index) => (
-            <li key={player.id} className="py-1">{player.name} {player.id === localPlayerId && "(You)"}</li>
+            <li key={player.id} className="py-1">
+              {player.name} {player.id === localPlayerId && "(You)"} {player.id.startsWith('bot_') && "(Bot)"}
+            </li>
           ))}
         </ul>
       </div>
+      {players.length < maxPlayers && (
+        <Button
+          onClick={handleAddBot}
+          className="w-full py-3 text-lg font-semibold bg-green-600 hover:bg-green-700 text-white rounded-lg shadow-md transition-all duration-200 ease-in-out transform hover:scale-105"
+        >
+          Add Bot ({maxPlayers - players.length} slots left)
+        </Button>
+      )}
     </div>
   );
 };
